@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DuoVersus (Supabase Edition)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        /* CSS SAMA SEPERTI SEBELUMNYA */
+        body { font-family: 'Nunito', sans-serif; background-color: #235390; color: white; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background: white; color: #333; padding: 2rem; border-radius: 20px; width: 90%; max-width: 400px; text-align: center; box-shadow: 0 10px 0 #183a66; }
+        .hidden { display: none; }
+        button { background-color: #58cc02; color: white; border: none; padding: 15px; width: 100%; border-radius: 15px; font-size: 1.2rem; font-weight: bold; cursor: pointer; box-shadow: 0 5px 0 #46a302; margin-top: 10px; }
+        button:active { transform: translateY(5px); box-shadow: none; }
+        input { width: 85%; padding: 15px; margin-bottom: 10px; border: 2px solid #e5e5e5; border-radius: 15px; }
+        .header { display: flex; justify-content: space-between; margin-bottom: 20px; font-weight: bold; }
+        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .option-btn { background-color: white; border: 2px solid #e5e5e5; color: #4b4b4b; box-shadow: 0 4px 0 #e5e5e5; }
+        .win { color: #58cc02; font-size: 2rem; } .lose { color: #ff4b4b; font-size: 2rem; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div id="lobby-screen">
+            <h1>DuoVersus 🔥</h1>
+            <p>Powered by Supabase</p>
+            <input type="text" id="username" placeholder="Nama Kamu">
+            <input type="text" id="roomId" placeholder="Kode Ruangan (Contoh: 123)">
+            <button onclick="joinGame()">MASUK ARENA</button>
+            <p id="status" style="margin-top:10px; color: #888;">Siap bermain...</p>
+        </div>
+
+        <div id="game-screen" class="hidden">
+            <div class="header">
+                <div><span id="my-name">Aku</span>: <span id="my-score">0</span></div>
+                <div>VS</div>
+                <div><span id="opp-name">Lawan</span>: <span id="opp-score">0</span></div>
+            </div>
+            <h2 id="question-text">Loading...</h2>
+            <div class="options-grid" id="options-container"></div>
+            <div id="result-message" class="hidden"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- KONFIGURASI SUPABASE (GANTI INI!) ---
+        const SUPABASE_URL = 'https://iumezdbovfntdwhtnuqf.supabase.co'; 
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1bWV6ZGJvdmZudGR3aHRudXFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2NzU5MjgsImV4cCI6MjA4MDI1MTkyOH0.d6CJ_rXra384a2777oCn9HMGOFkuD3SehVVvwcnLZtA'; 
+        
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let myName = "";
+        let myScore = 0;
+        let channel = null;
+        let hasOpponent = false;
+
+        // Soal
+        const questions = [
+            { q: "Apa bahasa Inggris 'Apel'?", options: ["Apple", "Grape", "Banana", "Melon"], ans: 0 },
+            { q: "Translate: 'Red'", options: ["Biru", "Merah", "Hijau", "Kuning"], ans: 1 },
+            { q: "Bahasa Inggris 'Kucing'?", options: ["Dog", "Cat", "Bird", "Fish"], ans: 1 },
+            { q: "1 + 1 = ?", options: ["1", "2", "3", "11"], ans: 1 }
+        ];
+        let qIndex = 0;
+
+        async function joinGame() {
+            const username = document.getElementById('username').value;
+            const roomId = document.getElementById('roomId').value;
+
+            if (!username || !roomId) return alert("Isi nama & kode!");
+
+            myName = username;
+            document.getElementById('my-name').innerText = myName;
+            document.getElementById('status').innerText = "Menghubungkan ke server...";
+
+            // 1. Buat Channel Realtime
+            channel = supabase.channel(roomId);
+
+            // 2. Setup Listener (Mendengar pesan dari lawan)
+            channel
+                .on('broadcast', { event: 'score_update' }, (payload) => {
+                    // Jika lawan update skor
+                    document.getElementById('opp-score').innerText = payload.payload.score;
+                    if(payload.payload.score >= 30) endGame(false); // Lawan menang
+                })
+                .on('presence', { event: 'sync' }, () => {
+                    // Cek siapa saja yang ada di room
+                    const newState = channel.presenceState();
+                    const users = Object.values(newState).flat();
+                    
+                    if (users.length >= 2) {
+                        // Cari nama lawan
+                        const opponent = users.find(u => u.user !== myName);
+                        if(opponent) {
+                            document.getElementById('opp-name').innerText = opponent.user;
+                            startGame();
+                        }
+                    }
+                })
+                .subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED') {
+                        // Kirim data diri ke room
+                        await channel.track({ user: myName });
+                        document.getElementById('status').innerText = "Menunggu lawan...";
+                    }
+                });
+        }
+
+        function startGame() {
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            if(qIndex >= questions.length) qIndex = 0;
+            const q = questions[qIndex];
+            document.getElementById('question-text').innerText = q.q;
+            
+            const div = document.getElementById('options-container');
+            div.innerHTML = '';
+            q.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = opt;
+                btn.onclick = () => answer(idx, q.ans);
+                div.appendChild(btn);
+            });
+        }
+
+        function answer(idx, ans) {
+            if(idx === ans) {
+                myScore += 10;
+                document.getElementById('my-score').innerText = myScore;
+                
+                // KIRIM SKOR KE LAWAN (Broadcast)
+                channel.send({
+                    type: 'broadcast',
+                    event: 'score_update',
+                    payload: { score: myScore }
+                });
+
+                if(myScore >= 30) endGame(true); // Menang
+                else {
+                    qIndex++;
+                    loadQuestion();
+                }
+            } else {
+                alert("Salah!");
+            }
+        }
+
+        function endGame(isWin) {
+            document.getElementById('options-container').innerHTML = '';
+            const msg = document.getElementById('result-message');
+            msg.classList.remove('hidden');
+            if(isWin) msg.innerHTML = "<div class='win'>KAMU MENANG! 🎉</div>";
+            else msg.innerHTML = "<div class='lose'>KAMU KALAH! 😢</div>";
+        }
+    </script>
+</body>
+</html>
