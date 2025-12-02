@@ -11,6 +11,7 @@
         .hidden { display: none; }
         button { background-color: #58cc02; color: white; border: none; padding: 15px; width: 100%; border-radius: 15px; font-size: 1.2rem; font-weight: bold; cursor: pointer; box-shadow: 0 5px 0 #46a302; margin-top: 10px; }
         button:active { transform: translateY(5px); box-shadow: none; }
+        button:disabled { background-color: #ccc; box-shadow: none; cursor: not-allowed; }
         input { width: 85%; padding: 15px; margin-bottom: 10px; border: 2px solid #e5e5e5; border-radius: 15px; }
         .header { display: flex; justify-content: space-between; margin-bottom: 20px; font-weight: bold; }
         .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
@@ -27,7 +28,7 @@
             <input type="text" id="username" placeholder="Nama Kamu">
             <input type="text" id="roomId" placeholder="Kode Ruangan (Contoh: 123)">
             <button id="btn-join" onclick="joinGame()">MASUK ARENA</button>
-            <p id="status" style="margin-top:10px; color: #888;">Siap bermain...</p>
+            <p id="status" style="margin-top:10px; color: #888; font-size: 0.9rem;">Siap bermain...</p>
         </div>
 
         <div id="game-screen" class="hidden">
@@ -44,22 +45,27 @@
 
     <script>
         // ==========================================
-        // AREA INI WAJIB DIISI DENGAN DATA KAMU !!!!
+        // ISI DATA SUPABASE DI SINI (JANGAN SALAH!)
         // ==========================================
         
-        // Contoh: 'https://blabla.supabase.co' (JANGAN LUPA TANDA KUTIPNYA)
         const SUPABASE_URL = 'https://iumezdbovfntdwhtnuqf.supabase.co'; 
-        
-        // Contoh: 'eyJhbGciOiJIUzI1NiIsIn...' (KEY YANG PANJANG)
         const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml1bWV6ZGJvdmZudGR3aHRudXFmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2NzU5MjgsImV4cCI6MjA4MDI1MTkyOH0.d6CJ_rXra384a2777oCn9HMGOFkuD3SehVVvwcnLZtA'; 
 
         // ==========================================
         
-        let supabase;
+        // Perbaikan: Menggunakan nama variabel 'db' agar tidak bentrok
+        let db = null; 
+
+        // Inisialisasi Database
         try {
-            supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+            if (typeof supabase !== 'undefined') {
+                db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+            } else {
+                alert("Gagal memuat library Supabase. Cek koneksi internetmu.");
+            }
         } catch (err) {
-            alert("Error Konfigurasi Supabase: Pastikan URL dan KEY sudah benar di dalam kodingan!");
+            console.error(err);
+            alert("Error inisialisasi: Cek Console untuk detail.");
         }
 
         let myName = "";
@@ -76,13 +82,17 @@
         let qIndex = 0;
 
         async function joinGame() {
+            // Cek apakah user sudah mengisi URL/Key
+            if (SUPABASE_URL.includes("GANTI_DENGAN")) {
+                alert("STOP! Kamu belum mengisi URL dan KEY di dalam kodingan index.html!");
+                return;
+            }
+
             const username = document.getElementById('username').value;
             const roomId = document.getElementById('roomId').value;
 
             if (!username || !roomId) return alert("Isi nama & kode ruangan dulu!");
-            // Cek apakah user lupa mengganti URL default
-            if (SUPABASE_URL.includes("GANTI_DENGAN")) return alert("Kamu belum memasukkan Kunci Supabase di kodingan! Baca tutorial lagi.");
-
+            
             myName = username;
             document.getElementById('my-name').innerText = myName;
             
@@ -91,8 +101,8 @@
             btn.innerText = "Menghubungkan...";
             document.getElementById('status').innerText = "Sedang mencari server...";
 
-            // 1. Buat Channel
-            channel = supabase.channel(roomId, {
+            // Menggunakan variabel 'db' yang sudah diperbaiki
+            channel = db.channel(roomId, {
                 config: {
                     presence: {
                         key: myName,
@@ -100,7 +110,6 @@
                 },
             });
 
-            // 2. Setup Listener
             channel
                 .on('broadcast', { event: 'score_update' }, (payload) => {
                     document.getElementById('opp-score').innerText = payload.payload.score;
@@ -108,19 +117,13 @@
                 })
                 .on('presence', { event: 'sync' }, () => {
                     const newState = channel.presenceState();
-                    const users = Object.values(newState).flat();
-                    
-                    // Cek user lain selain kita
-                    const opponent = users.find(u => u.presence_ref !== channel.presenceState()[myName]?.[0]?.presence_ref);
-                    
-                    // Logika sederhana mendeteksi lawan (ambil nama user pertama yg bukan kita)
-                    // Note: Supabase presence key adalah unik per user di kode ini
                     const userKeys = Object.keys(newState);
+                    
+                    // Cari nama lawan (yang bukan nama kita)
                     const oppNameKey = userKeys.find(key => key !== myName);
 
                     if (oppNameKey) {
                         document.getElementById('opp-name').innerText = oppNameKey;
-                        // Jika ada 2 orang, mulai game
                         if(userKeys.length >= 2) {
                             startGame();
                         }
@@ -128,19 +131,19 @@
                 })
                 .subscribe((status) => {
                     if (status === 'SUBSCRIBED') {
-                        document.getElementById('status').innerText = "Berhasil masuk! Menunggu lawan...";
-                        // Kirim sinyal kehadiran
+                        document.getElementById('status').innerText = "Masuk room! Menunggu lawan...";
                         channel.track({ online_at: new Date().toISOString() });
                     } else {
                         btn.disabled = false;
                         btn.innerText = "MASUK ARENA";
-                        alert("Gagal konek ke Supabase: " + status);
+                        document.getElementById('status').innerText = "Gagal konek.";
+                        alert("Gagal konek ke Supabase. Cek URL/KEY kamu.");
                     }
                 });
         }
 
         function startGame() {
-            if(!document.getElementById('game-screen').classList.contains('hidden')) return; // Sudah mulai
+            if(!document.getElementById('game-screen').classList.contains('hidden')) return; 
             
             document.getElementById('lobby-screen').classList.add('hidden');
             document.getElementById('game-screen').classList.remove('hidden');
@@ -180,7 +183,6 @@
                     loadQuestion();
                 }
             } else {
-                // Animasi getar sederhana
                 const container = document.getElementById('options-container');
                 container.style.transform = "translateX(5px)";
                 setTimeout(() => container.style.transform = "translateX(0)", 100);
@@ -189,15 +191,14 @@
 
         function endGame(isWin) {
             document.getElementById('options-container').innerHTML = '';
-            document.getElementById('question-text').innerText = "GAME OVER";
+            document.getElementById('question-text').innerText = "GAME SELESAI";
             
             const msg = document.getElementById('result-message');
             msg.classList.remove('hidden');
             if(isWin) msg.innerHTML = "<div class='win'>KAMU MENANG! 🎉</div>";
             else msg.innerHTML = "<div class='lose'>KAMU KALAH! 😢</div>";
             
-            // Unsubscribe channel agar bersih
-            supabase.removeChannel(channel);
+            db.removeChannel(channel);
         }
     </script>
 </body>
